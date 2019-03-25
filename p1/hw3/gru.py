@@ -91,40 +91,35 @@ class GRU_Cell:
 		# output:
 		# 	- dx: 	Derivative of loss wrt the input x
 		# 	- dh: 	Derivative of loss wrt the input hidden h
-		print("delta shape:", delta.shape)
-		print("in_dim:", self.d)
-		print("hidden_dim:", self.h)
 		dz_12 = dz_13 = delta
 		dz_t = np.multiply(dz_13, self.h_t_tilt.T)
 		dh_t_tilt = np.multiply(dz_13, self.z_t.T)
-		# print(dh_t_tilt.shape)
 		dz_11 = np.multiply(dz_12, self.h_t_prev.T)
 		dh_t = np.multiply(dz_12, self.z_11.T)
 		dz_t += -dz_11
 
 		dz_10 = np.multiply(dh_t_tilt, self.h_act.backward().T)
-		# print(dz_10.shape)
 		dz_8 = dz_9 = dz_10
 		self.dWx = np.matmul(self.x.reshape(-1, 1), dz_9).T
-		dx = np.dot(dz_9, self.Wx)
-		self.dWh = np.dot(self.z_7.reshape(-1, 1), dz_8).T
-		dz_7 = np.dot(dz_8, self.Wh)
+		dx = np.matmul(dz_9, self.Wx)
+		self.dWh = np.matmul(self.z_7.reshape(-1, 1), dz_8).T
+		dz_7 = np.matmul(dz_8, self.Wh)
 		dr_t = np.multiply(dz_7, self.h_t_prev.T)
 		dh_t += np.multiply(dz_7, self.r_t.T)
 
 		dz_6 = np.multiply(dr_t, self.r_act.backward().T)
 		dz_4 = dz_5 = dz_6
-		self.dWrx = np.dot(self.x.reshape(-1, 1), dz_5).T
-		dx += np.dot(dz_5, self.dWrx)
-		self.dWrh = np.dot(self.h_t_prev.reshape(-1, 1), dz_4).T
-		dh_t += np.dot(dz_4, self.Wrh)
+		self.dWrx = np.matmul(self.x.reshape(-1, 1), dz_5).T
+		dx += np.matmul(dz_5, self.Wrx)
+		self.dWrh = np.matmul(self.h_t_prev.reshape(-1, 1), dz_4).T
+		dh_t += np.matmul(dz_4, self.Wrh)
 
 		dz_3 = np.multiply(dz_t, self.z_act.backward().T)
 		dz_2 = dz_1 = dz_3
-		self.dWzx = np.dot(self.x.reshape(-1, 1), dz_2).T
-		dx += np.dot(dz_2, self.Wzx)
-		self.dWzh = np.dot(self.h_t_prev.reshape(-1, 1), dz_1).T
-		dh_t += np.dot(dz_1, self.Wzh)
+		self.dWzx = np.matmul(self.x.reshape(-1, 1), dz_2).T
+		dx += np.matmul(dz_2, self.Wzx)
+		self.dWzh = np.matmul(self.h_t_prev.reshape(-1, 1), dz_1).T
+		dh_t += np.matmul(dz_1, self.Wzh)
 
 		return dx, dh_t
 
