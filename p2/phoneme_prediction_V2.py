@@ -16,13 +16,13 @@ from phoneme_list import PHONEME_MAP
 
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-BATCH_SIZE = 64
+BATCH_SIZE = 32
 EPOCHS = 8
 LR = 1e-3
 INTERVAL = 10
 PHONEME_SIZE = 40
 EMBED_SIZE = 256
-HIDDEN_SIZE = 256
+HIDDEN_SIZE = 512
 NUM_LAYERS = 3
 BEAM_WIDTH = 100
 
@@ -88,8 +88,10 @@ class PhonemeModel(nn.Module):
 
     def init_weights(self):
         for m in self.modules():
-            if type(m) == nn.Conv2d or type(m) == nn.Linear:
+            if type(m) == nn.Linear:
                 torch.nn.init.xavier_normal_(m.weight.data)
+            elif type(m) == nn.LSTM:
+                torch.nn.init.xavier_normal_(m.weight_hh_l0)
 
 
 class ER:
@@ -101,53 +103,31 @@ class ER:
             beam_width=BEAM_WIDTH
         )
 
-    def __call__(self, prediction, seq_size, target):
+    def __call__(self, prediction, seq_size, target=None):
         return self.forward(prediction, seq_size, target)
 
-    def forward(self, prediction, seq_size, target):
+    def forward(self, prediction, seq_size, target=None):
         prediction = torch.transpose(prediction, 0, 1)
         prediction = prediction.cpu()
         probs = F.softmax(prediction, dim=2)
         output, scores, timesteps, out_seq_len = self.decoder.decode(probs=probs, seq_lens=torch.IntTensor(seq_size))
 
-        decoded = []
+        pred = []
         for i in range(output.size(0)):
-            chrs = ""
-            if out_seq_len[i, 0] != 0:
-                chrs = "".join(self.label_map[o] for o in output[i, 0, :out_seq_len[i, 0]])
-            decoded.append(chrs)
+            pred.append("".join(self.label_map[o] for o in output[i, 0, :out_seq_len[i, 0]]))
 
-        label_str = []
-        for t in target:
-            label_str.append("".join(self.label_map[o] for o in t))
+        if target is not None:
+            true = []
+            for t in target:
+                true.append("".join(self.label_map[o] for o in t))
 
-        ls = 0.
-        for pred, true in zip(decoded, label_str):
-            l = L.distance(pred.replace(" ", ""), true.replace(" ", ""))
-            ls += l
-        print("PER:", ls * 100 / sum(len(s) for s in label_str))
-        return ls
-
-
-def decode(prediction, seq_size):
-    label_map = [' '] + PHONEME_MAP
-    decoder = CTCBeamDecoder(
-        labels=label_map,
-        blank_id=0,
-        beam_width=BEAM_WIDTH
-    )
-    prediction = torch.transpose(prediction, 0, 1)
-    prediction = prediction.cpu()
-    probs = F.softmax(prediction, dim=2)
-    output, scores, timesteps, out_seq_len = decoder.decode(probs=probs, seq_lens=torch.IntTensor(seq_size))
-
-    decoded = []
-    for i in range(output.size(0)):
-        chrs = ""
-        if out_seq_len[i, 0] != 0:
-            chrs = "".join(label_map[o] for o in output[i, 0, :out_seq_len[i, 0]])
-        decoded.append(chrs)
-    return decoded
+                ls = 0.
+                for p, t in zip(pred, true):
+                    ls += L.distance(p.replace(" ", ""), t.replace(" ", ""))
+                print("PER:", ls * 100 / sum(len(s) for s in true))
+                return ls
+        else:
+            return pred
 
 
 def train(train_loader, dev_loader, model, optimizer, e):
@@ -200,9 +180,10 @@ def prediction(loader, model, output_file):
     fwrite = open(output_file, "w")
     fwrite.write("Id,Predicted\n")
     line = 0
+    error_rate_op = ER()
     for data_batch, _, input_lengths, _ in loader:
         predictions_batch = model(data_batch, input_lengths)
-        decode_strs = decode(predictions_batch, input_lengths)
+        decode_strs = error_rate_op(predictions_batch, input_lengths)
         for s in decode_strs:
             if line % INTERVAL == 0:
                 print(line, s)
@@ -230,14 +211,30 @@ def main():
 
     print("begin running!")
     model = PhonemeModel()
-    model.load_state_dict(torch.load("models/checkpoint30.146359956463783.pt"))
+    model.load_state_dict(torch.load("models/finetune00.006995144978048452.pt"))
     model.to(DEVICE)
+    # for param in model.parameters():
+    #     param.requires_grad = False
+
+    # model.rnn = nn.LSTM(input_size=PHONEME_SIZE, hidden_size=512, num_layers=3, bidirectional=True, batch_first=False)
+    # model.output_layer = nn.Sequential(
+    #     nn.Linear(in_features=1024, out_features=len(PHONEME_MAP) + 1)
+    # )
     optimizer = optim.Adam(model.parameters(), lr=LR)
+    # train(train_loader, dev_loader, model, optimizer, -1)
+    # per = eval(dev_loader, model)
+    # torch.save(model.state_dict(), "models/finetune" + str(per) + ".pt")
+
+    # for param in model.parameters():
+    #     param.requires_grad = True
+
     for e in range(EPOCHS):
         train(train_loader, dev_loader, model, optimizer, e)
-        per = eval(dev_loader, model)
-        torch.save(model.state_dict(), "models/checkpoint" + str(e) + str(per) + ".pt")
+        # per = eval(dev_loader, model)
+        torch.save(model.state_dict(), "models/finetune" + str(e) + ".pt")
         prediction(test_loader, model, "submission_" + str(e) + ".csv")
+
+    # prediction(test_loader, model, "submission.csv")
 
 
 if __name__ == "__main__":
